@@ -208,6 +208,15 @@ export class BrowserNotificationService {
   // ---------------------------------------------------------------------
 
   private fire(reason: 'schedule' | 'manual' | 'test-5s' = 'schedule'): void {
+    console.log('[BrowserNotification] fire() reason=' + reason, {
+      supported: this.supported,
+      permission: this._permission(),
+      iOS: this.isIOS(),
+      standalone: this.isStandalone(),
+      private: this.isPrivateMode(),
+      hidden: this.isPageHidden()
+    });
+
     if (!this.supported) {
       this.fallbackInApp('Tu navegador no soporta notificaciones del sistema.', 'warning');
       return;
@@ -216,49 +225,39 @@ export class BrowserNotificationService {
       this.fallbackInApp('Concede permiso para enviar la notificación.', 'warning');
       return;
     }
-    const summary = this.buildSummary() ?? 'Esta es una notificación de prueba del Copilot Financiero.';
-
-    // Aviso en iOS Safari: las notificaciones sólo funcionan si la app
-    // está instalada como PWA. Lo informamos pero igualmente intentamos
-    // crear la notificación por si acaso.
-    if (this.isIOS() && !this.isStandalone()) {
-      this.fallbackInApp('En iOS las notificaciones sólo funcionan si instalas la app desde Safari (Compartir → Añadir a pantalla de inicio).', 'warning');
-      // Aún así intentamos crear la notificación por si el usuario ya
-      // la instaló como PWA.
+    if (this.isPrivateMode()) {
+      this.fallbackInApp('El modo privado/incógnito desactiva las notificaciones del navegador.', 'warning');
+      return;
     }
 
-    // Intentar la notificación del SO. Si lanza o no se puede crear,
-    // caemos al fallback in-app.
+    const summary = this.buildSummary() ?? 'Esta es una notificación de prueba del Copilot Financiero.';
+
+    if (this.isIOS() && !this.isStandalone()) {
+      this.fallbackInApp('En iOS las notificaciones sólo funcionan si instalas la app desde Safari (Compartir → Añadir a pantalla de inicio).', 'warning');
+      // Aún así intentamos.
+    }
+
+    // Refuerzo háptico en móvil. Muchos navegadores lo soportan
+    // aunque las notificaciones nativas fallen.
+    this.tryVibrate();
+
     try {
-      // Diferimos la creación con requestAnimationFrame para que el
-      // navegador la trate como una acción del usuario real (algunos
-      // navegadores descartan notificaciones si se crean en el mismo
-      // tick del click).
       requestAnimationFrame(() => {
         try {
-          // Sin `tag` para que cada prueba sea una notificación NUEVA
-          // y no reemplace a la anterior (eso puede hacer que parezca
-          // que no se envió).
-          // `requireInteraction: true` mantiene la notificación
-          // visible hasta que el usuario la cierre, como las de noticias.
           const n = new Notification('💠 Copilot Financiero', {
             body: summary,
             icon: '/economico.png',
             badge: '/economico.png',
             silent: false,
             requireInteraction: true,
-            tag: `cf-${Date.now()}`
+            tag: `cf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
           });
-          n.onclick = () => {
-            window.focus();
-            n.close();
-          };
-          console.log('[BrowserNotification] enviada:', summary);
+          n.onclick = () => { window.focus(); n.close(); };
+          console.log('[BrowserNotification] ✓ Notificación nativa creada OK:', summary);
           this.toast.success(
             'Notificación del navegador enviada',
-            summary + ' (revisa la bandeja del sistema operativo)'
+            summary + ' — revisa la bandeja del sistema operativo (arriba a la derecha en Windows / barra superior en Mac / panel de notificaciones en Android).'
           );
-          // También la añadimos a la bandeja in-app como respaldo.
           this.notifications.push({
             title: '💠 Copilot Financiero',
             description: summary,
@@ -268,14 +267,36 @@ export class BrowserNotificationService {
             referenceId: 'browser-sent-' + Date.now()
           });
         } catch (innerErr: any) {
-          console.warn('[BrowserNotification] error en rAF:', innerErr);
+          console.warn('[BrowserNotification] ✗ error creando Notification:', innerErr);
           this.fallbackInApp(this.explainError(innerErr), 'danger');
         }
       });
     } catch (e: any) {
-      console.warn('[BrowserNotification] error creando Notification:', e);
+      console.warn('[BrowserNotification] ✗ error en rAF:', e);
       this.fallbackInApp(this.explainError(e), 'danger');
     }
+  }
+
+  /**
+   * Vibración háptica. En muchos móviles vibra aunque la
+   * notificación nativa no se haya podido crear.
+   */
+  private tryVibrate(): void {
+    try {
+      if (typeof navigator !== 'undefined' && 'vibrate' in navigator) {
+        (navigator as any).vibrate([200, 100, 200]);
+      }
+    } catch { /* ignore */ }
+  }
+
+  /** Detecta modo privado/incógnito (las notificaciones suelen estar deshabilitadas). */
+  private isPrivateMode(): boolean {
+    if (typeof window === 'undefined') return false;
+    try {
+      // En Chrome, los archivos de cuota están deshabilitados en incognito
+      const fs = (navigator as any).webkitTemporaryStorage;
+      return !fs;
+    } catch { return false; }
   }
 
   /**
