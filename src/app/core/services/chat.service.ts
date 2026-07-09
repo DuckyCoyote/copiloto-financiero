@@ -115,11 +115,22 @@ export class ChatService {
     }
 
     const system = this.buildSystemPrompt(userText);
+
+    // Construimos el historial completo de la conversación para que
+    // la IA recuerde los turnos anteriores y dé respuestas
+    // puntuales sin tener que pedir confirmación otra vez.
+    const history = this.messages().slice(-20).map(m => ({
+      role: m.role as 'user' | 'assistant',
+      content: m.content
+    }));
+    const messages: { role: 'system' | 'user' | 'assistant'; content: string }[] = [
+      { role: 'system', content: system },
+      ...history,
+      { role: 'user', content: userText }
+    ];
+
     try {
-      const reply = await this.ai.chat([
-        { role: 'system', content: system },
-        { role: 'user', content: userText }
-      ]);
+      const reply = await this.ai.chat(messages);
       return { ...reply, id: reply.id ?? uuid() };
     } catch (e: unknown) {
       return {
@@ -231,27 +242,28 @@ export class ChatService {
     const lc = userText?.toLowerCase() ?? '';
     const wantsSummary = /resumen|resúmen|análisis|analisis|estado general|cómo estoy|cómo voy|dame el panorama|overview/.test(lc);
     const wantsRecs = /recomiend|sugerenc|qué hago|qué debería|consejo|aconseja/.test(lc);
+    const wantsPlan = /plan|tabla|calendario|fechas?|montos? exactos?|simulaci[oó]n|c[oó]mo (puedo|debo|hago)/.test(lc);
 
-    // Por defecto el system prompt es breve y le dice a la IA que
-    // responda SOLO lo que el usuario pidió. Solo si el usuario
-    // pidió explícitamente un resumen o recomendaciones, se incluyen
-    // las secciones adicionales. Así evitamos gastar tokens con
-    // respuestas genéricas que repiten todo.
+    // Prompt directo: la IA debe responder YA con datos concretos,
+    // NO pedir confirmación ni preguntar "¿quieres que...?".
     let base = `Eres el Copilot Financiero del usuario. Tienes acceso a sus datos locales guardados en la app.
 
-Reglas importantes:
-- Responde SOLO lo que el usuario pidió. No hagas resúmenes, análisis ni recomendaciones a menos que te los pida explícitamente.
-- Sé conciso: la respuesta ideal cabe en 1-3 frases o una lista corta. Solo usa más si es necesario.
-- Si el usuario hace una pregunta concreta, respóndela de forma directa. No agregues contexto extra.
-- No inventes datos. Si no tienes la información, dilo.
-- Puedes usar Markdown breve: **negrita**, listas, \`código\`.
-- Si el usuario pide modificar algo, explica que requerirá su confirmación.
+REGLAS CRÍTICAS (léelas y respétalas siempre):
+1. RESPONDE DIRECTAMENTE. Nunca preguntes "¿quieres que te lo prepare?" o "¿lo armo?". Si el usuario pidió algo, HAZLO en la misma respuesta.
+2. NO pidas confirmación para hacer algo que el usuario ya pidió explícitamente.
+3. Si el usuario pide un plan, una tabla, una simulación, fechas, montos exactos: GENERA la respuesta completa con los datos que tienes. No digas "podría hacerlo" — hazlo.
+4. Si el usuario pide fechas y montos exactos, calcula y muestra los números concretos (fechas del mes, cantidades, prioridades). NO digas "necesito más datos" a menos que REALMENTE te falten.
+5. Si el usuario hace una pregunta concreta, respóndela de forma directa y breve.
+6. No inventes datos. Si falta algún dato del usuario, di claramente cuál.
+7. Puedes usar Markdown breve: **negrita**, listas, \`código\`, tablas.
+8. Mantén la memoria de la conversación: si el usuario ya mencionó algo antes (como "mis quincenas son de 15000"), recuérdalo.
+9. Si el usuario pide "sugerencias" o "qué hago", da una lista concreta de acciones, no más preguntas.
 
-=== RESUMEN MÍNIMO (úsalo solo si lo necesitas) ===
+=== RESUMEN MÍNIMO ===
 - ${this.finance.income().length} ingresos, ${this.finance.expenses().length} gastos, ${this.finance.creditCards().length} tarjetas, ${this.finance.loans().length} préstamos.
 - Total adeudado: ${totals.totalDebt.toFixed(2)} | Suscripciones/mes: ${totals.subscriptionsMonthly.toFixed(2)}.
 
-=== DATOS COMPLETOS (úsalo solo si la pregunta lo requiere) ===
+=== DATOS COMPLETOS (úsalo siempre que la pregunta lo requiera) ===
 ${JSON.stringify(snap)}`;
 
     if (wantsSummary) {
