@@ -135,15 +135,7 @@ export class BrowserNotificationService {
    * probar el funcionamiento o para "avisar ya").
    */
   sendTest(): void {
-    if (!this.supported) {
-      this.toast.warning('No compatible', 'Tu navegador no soporta notificaciones.');
-      return;
-    }
-    if (this._permission() !== 'granted') {
-      this.toast.warning('Sin permiso', 'Concede permiso para enviar la prueba.');
-      return;
-    }
-    this.fire();
+    this.fire('manual');
   }
 
   /**
@@ -153,7 +145,7 @@ export class BrowserNotificationService {
    */
   sendTestIn5Seconds(): void {
     if (!this.supported) {
-      this.toast.warning('No compatible', 'Tu navegador no soporta notificaciones.');
+      this.toast.warning('No compatible', 'Tu navegador no soporta notificaciones del sistema.');
       return;
     }
     if (this._permission() !== 'granted') {
@@ -161,7 +153,7 @@ export class BrowserNotificationService {
       return;
     }
     this.toast.info('Notificación programada', 'Recibirás una de prueba en 5 segundos.');
-    setTimeout(() => this.fire(), 5000);
+    setTimeout(() => this.fire('test-5s'), 5000);
   }
 
   // ---------------------------------------------------------------------
@@ -213,10 +205,16 @@ export class BrowserNotificationService {
   // Envío
   // ---------------------------------------------------------------------
 
-  private fire(): void {
-    if (!this.supported || this._permission() !== 'granted') return;
-    const summary = this.buildSummary();
-    if (!summary) return;
+  private fire(reason: 'schedule' | 'manual' | 'test-5s' = 'schedule'): void {
+    if (!this.supported) {
+      this.toast.warning('No compatible', 'Tu navegador no soporta notificaciones del sistema.');
+      return;
+    }
+    if (this._permission() !== 'granted') {
+      this.toast.warning('Sin permiso', 'Concede permiso para enviar la prueba.');
+      return;
+    }
+    const summary = this.buildSummary() ?? 'Esta es una notificación de prueba del Copilot Financiero.';
     try {
       const n = new Notification('💠 Copilot Financiero', {
         body: summary,
@@ -227,8 +225,18 @@ export class BrowserNotificationService {
         window.focus();
         n.close();
       };
-    } catch {
-      // Algunos navegadores lanzan si se llama desde background.
+      this.toast.success(
+        reason === 'manual' ? 'Notificación enviada' :
+        reason === 'test-5s' ? 'Notificación programada enviada' :
+        'Aviso diario enviado',
+        summary
+      );
+    } catch (e) {
+      console.error('Error creando Notification:', e);
+      this.toast.danger(
+        'No se pudo enviar la notificación',
+        'Tu navegador bloqueó la solicitud. Revisa los permisos del sitio.'
+      );
     }
   }
 

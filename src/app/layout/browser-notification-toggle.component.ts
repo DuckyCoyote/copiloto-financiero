@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, ElementRef, HostListener, inject, signal } from '@angular/core';
 import { BrowserNotificationService } from '../core/services/browser-notification.service';
+import { NotificationService } from '../core/services/notification.service';
 import { IconComponent } from '../shared/icon/icon.component';
 
 @Component({
@@ -51,6 +52,9 @@ import { IconComponent } from '../shared/icon/icon.component';
           }
 
           <div class="actions">
+            <button type="button" class="btn" (click)="testInApp()">
+              <app-icon name="bell" [size]="14"></app-icon> Crear in-app
+            </button>
             @if (bns.supported && !bns.blocked()) {
               @if (bns.enabled()) {
                 <button type="button" class="btn" (click)="disable()">Desactivar</button>
@@ -106,6 +110,7 @@ import { IconComponent } from '../shared/icon/icon.component';
 })
 export class BrowserNotificationToggleComponent {
   readonly bns = inject(BrowserNotificationService);
+  readonly notif = inject(NotificationService);
   readonly open = signal(false);
   private readonly el = inject(ElementRef);
 
@@ -147,6 +152,11 @@ export class BrowserNotificationToggleComponent {
 
   testIn5(): void {
     this.bns.sendTestIn5Seconds();
+    this.open.set(false);
+  }
+
+  testInApp(): void {
+    this.notif.pushTest();
     this.open.set(false);
   }
 

@@ -119,6 +119,18 @@ export class NotificationService {
   // Generación automática de notificaciones
   // ---------------------------------------------------------------------
 
+  /** Crea una notificación in-app de prueba (para verificar la bandeja). */
+  pushTest(): AppNotification {
+    return this.push({
+      title: 'Notificación de prueba',
+      description: 'Esta es una notificación generada manualmente para verificar la bandeja.',
+      severity: 'info',
+      category: 'system',
+      announce: true,
+      referenceId: 'test'
+    });
+  }
+
   /**
    * Compara el set actual con el anterior para evitar duplicados:
    * sólo añade notificaciones cuyo `title + referenceId` no exista.
