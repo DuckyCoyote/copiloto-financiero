@@ -2,7 +2,7 @@ import { CommonModule } from '@angular/common';
 import { Component, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { AIProviderId, AI_PROVIDERS, Currency } from '../../core/models';
-import { AIService, CurrencyService, FinanceDataService, SUPPORTED_CURRENCIES, ToastService } from '../../core/services';
+import { AIService, AppSnapshot, CurrencyService, DemoDataService, FinanceDataService, SUPPORTED_CURRENCIES, ToastService } from '../../core/services';
 import { ConfirmDialogComponent } from '../../shared/confirm-dialog/confirm-dialog.component';
 import { IconComponent } from '../../shared/icon/icon.component';
 
@@ -150,12 +150,16 @@ import { IconComponent } from '../../shared/icon/icon.component';
 
     <section class="card mb-6">
       <h2>Datos</h2>
-      <div class="flex gap-2 flex-wrap">
+      <div class="data-actions">
         <button type="button" class="btn" (click)="exportData()">
           <app-icon name="download" [size]="14"></app-icon> Exportar JSON
         </button>
-        <button type="button" class="btn" (click)="seedDemo()">
-          <app-icon name="refresh" [size]="14"></app-icon> Datos de ejemplo
+        <button type="button" class="btn" (click)="triggerImport()">
+          <app-icon name="folder" [size]="14"></app-icon> Importar JSON
+        </button>
+        <input #importFile type="file" accept="application/json,.json" hidden (change)="onImportFile($event)" />
+        <button type="button" class="btn" (click)="loadDemo()">
+          <app-icon name="sparkles" [size]="14"></app-icon> Cargar datos de ejemplo
         </button>
         <button type="button" class="btn btn-danger" (click)="askReset.set(true)">
           <app-icon name="trash" [size]="14"></app-icon> Borrar todo
@@ -191,6 +195,17 @@ import { IconComponent } from '../../shared/icon/icon.component';
     details summary::-webkit-details-marker { display: none; }
     details[open] summary { margin-bottom: 8px; }
     @media (max-width: 600px) { .form-grid { grid-template-columns: 1fr; } }
+
+    /* Móvil y tablet: los botones de la sección Datos se apilan
+       verticalmente para que cada uno ocupe todo el ancho y sean
+       más fáciles de pulsar. */
+    .data-actions {
+      display: flex; gap: 8px; flex-wrap: wrap;
+    }
+    @media (max-width: 1024px) {
+      .data-actions { flex-direction: column; align-items: stretch; }
+      .data-actions .btn { width: 100%; justify-content: center; }
+    }
   `]
 })
 export class SettingsComponent {
@@ -200,6 +215,7 @@ export class SettingsComponent {
   readonly currency = inject(CurrencyService);
   readonly currencies = SUPPORTED_CURRENCIES;
   private readonly toast = inject(ToastService);
+  private readonly demo = inject(DemoDataService);
 
   readonly askReset = signal(false);
 
@@ -280,10 +296,48 @@ export class SettingsComponent {
     a.download = `copilot-financiero-${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     URL.revokeObjectURL(url);
+    this.toast.success('Exportado', 'Tu respaldo se descargó correctamente.');
   }
 
-  seedDemo(): void {
-    this.finance.reset();
+  /**
+   * Carga datos de ejemplo ADITIVAMENTE (sin borrar lo que ya tienes).
+   * Si ya tienes ingresos o gastos registrados, solo agrega los que faltan.
+   */
+  loadDemo(): void {
+    const before = this.finance.expenses().length + this.finance.income().length;
+    this.demo.seed();
+    const after = this.finance.expenses().length + this.finance.income().length;
+    const added = after - before;
+    if (added > 0) {
+      this.toast.success('Datos cargados', `Se agregaron ${added} registros de ejemplo.`);
+    } else {
+      this.toast.info('Ya tenías datos de ejemplo', 'No se agregaron duplicados.');
+    }
+  }
+
+  /** Abre el selector de archivo para importar un JSON. */
+  triggerImport(): void {
+    const el = document.querySelector<HTMLInputElement>('input[type="file"][accept*="json"]');
+    el?.click();
+  }
+
+  onImportFile(ev: Event): void {
+    const input = ev.target as HTMLInputElement;
+    const file = input.files?.[0];
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      try {
+        const data = JSON.parse(reader.result as string) as Partial<AppSnapshot>;
+        this.finance.hydrate(data);
+        this.toast.success('Importado', `Se restauraron los datos de "${file.name}".`);
+      } catch (e) {
+        this.toast.danger('Archivo inválido', 'El JSON no tiene el formato esperado.');
+      } finally {
+        input.value = '';
+      }
+    };
+    reader.readAsText(file);
   }
 
   confirmReset(): void {
