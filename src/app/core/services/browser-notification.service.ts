@@ -1,6 +1,7 @@
 import { Injectable, computed, effect, inject, signal } from '@angular/core';
 import { STORAGE_KEYS, StorageService } from './storage.service';
 import { FinanceDataService } from './finance-data.service';
+import { NotificationService } from './notification.service';
 import { ToastService } from './toast.service';
 
 /**
@@ -30,6 +31,7 @@ export class BrowserNotificationService {
   private readonly storage = inject(StorageService);
   private readonly finance = inject(FinanceDataService);
   private readonly toast = inject(ToastService);
+  private readonly notifications: NotificationService = inject(NotificationService);
 
   private readonly _enabled = signal<boolean>(
     this.storage.read<PersistedState>(STORAGE_KEY, { enabled: false }).enabled
@@ -207,37 +209,115 @@ export class BrowserNotificationService {
 
   private fire(reason: 'schedule' | 'manual' | 'test-5s' = 'schedule'): void {
     if (!this.supported) {
-      this.toast.warning('No compatible', 'Tu navegador no soporta notificaciones del sistema.');
+      this.fallbackInApp('Tu navegador no soporta notificaciones del sistema.', 'warning');
       return;
     }
     if (this._permission() !== 'granted') {
-      this.toast.warning('Sin permiso', 'Concede permiso para enviar la prueba.');
+      this.fallbackInApp('Concede permiso para enviar la notificación.', 'warning');
       return;
     }
     const summary = this.buildSummary() ?? 'Esta es una notificación de prueba del Copilot Financiero.';
-    try {
-      const n = new Notification('💠 Copilot Financiero', {
-        body: summary,
-        tag: 'cf-daily-summary',
-        silent: false
-      });
-      n.onclick = () => {
-        window.focus();
-        n.close();
-      };
-      this.toast.success(
-        reason === 'manual' ? 'Notificación enviada' :
-        reason === 'test-5s' ? 'Notificación programada enviada' :
-        'Aviso diario enviado',
-        summary
-      );
-    } catch (e) {
-      console.error('Error creando Notification:', e);
-      this.toast.danger(
-        'No se pudo enviar la notificación',
-        'Tu navegador bloqueó la solicitud. Revisa los permisos del sitio.'
-      );
+
+    // Aviso en iOS Safari: las notificaciones sólo funcionan si la app
+    // está instalada como PWA. Lo informamos pero igualmente intentamos
+    // crear la notificación por si acaso.
+    if (this.isIOS() && !this.isStandalone()) {
+      this.fallbackInApp('En iOS las notificaciones sólo funcionan si instalas la app desde Safari (Compartir → Añadir a pantalla de inicio).', 'warning');
+      // Aún así intentamos crear la notificación por si el usuario ya
+      // la instaló como PWA.
     }
+
+    // Intentar la notificación del SO. Si lanza o no se puede crear,
+    // caemos al fallback in-app.
+    try {
+      // Diferimos la creación con requestAnimationFrame para que el
+      // navegador la trate como una acción del usuario real (algunos
+      // navegadores descartan notificaciones si se crean en el mismo
+      // tick del click).
+      requestAnimationFrame(() => {
+        try {
+          // Sin `tag` para que cada prueba sea una notificación NUEVA
+          // y no reemplace a la anterior (eso puede hacer que parezca
+          // que no se envió).
+          // `requireInteraction: true` mantiene la notificación
+          // visible hasta que el usuario la cierre, como las de noticias.
+          const n = new Notification('💠 Copilot Financiero', {
+            body: summary,
+            icon: '/economico.png',
+            badge: '/economico.png',
+            silent: false,
+            requireInteraction: true,
+            tag: `cf-${Date.now()}`
+          });
+          n.onclick = () => {
+            window.focus();
+            n.close();
+          };
+          console.log('[BrowserNotification] enviada:', summary);
+          this.toast.success(
+            'Notificación del navegador enviada',
+            summary + ' (revisa la bandeja del sistema operativo)'
+          );
+          // También la añadimos a la bandeja in-app como respaldo.
+          this.notifications.push({
+            title: '💠 Copilot Financiero',
+            description: summary,
+            severity: 'info',
+            category: 'system',
+            announce: false,
+            referenceId: 'browser-sent-' + Date.now()
+          });
+        } catch (innerErr: any) {
+          console.warn('[BrowserNotification] error en rAF:', innerErr);
+          this.fallbackInApp(this.explainError(innerErr), 'danger');
+        }
+      });
+    } catch (e: any) {
+      console.warn('[BrowserNotification] error creando Notification:', e);
+      this.fallbackInApp(this.explainError(e), 'danger');
+    }
+  }
+
+  /**
+   * Cuando la notificación del SO no se puede enviar, registramos
+   * el aviso en la bandeja in-app (campana) y mostramos un toast.
+   * Así el usuario SIEMPRE recibe la información, incluso si su
+   * navegador bloquea las notificaciones nativas.
+   */
+  private fallbackInApp(summary: string, tone: 'info' | 'warning' | 'danger'): void {
+    this.notifications.push({
+      title: 'Aviso del Copilot Financiero',
+      description: summary,
+      severity: tone === 'danger' ? 'danger' : tone === 'warning' ? 'warning' : 'info',
+      category: 'system',
+      announce: true,
+      referenceId: 'browser-fallback'
+    });
+    if (tone === 'info') this.toast.info('Aviso (in-app)', summary);
+    else if (tone === 'warning') this.toast.warning('Aviso (in-app)', summary);
+    else this.toast.danger('Aviso (in-app)', summary);
+  }
+
+  private explainError(e: unknown): string {
+    const msg = (e as Error)?.message ?? String(e);
+    if (/denied/i.test(msg)) return 'Permiso denegado por el navegador.';
+    if (/secure|https/i.test(msg)) return 'Las notificaciones requieren HTTPS.';
+    return 'Tu navegador bloqueó la solicitud. Revisa los permisos del sitio.';
+  }
+
+  private isPageHidden(): boolean {
+    if (typeof document === 'undefined') return false;
+    return document.visibilityState === 'hidden' || document.hidden;
+  }
+
+  private isIOS(): boolean {
+    if (typeof navigator === 'undefined') return false;
+    return /iPad|iPhone|iPod/.test(navigator.userAgent) && !/CriOS|FxiOS|EdgiOS/.test(navigator.userAgent);
+  }
+
+  private isStandalone(): boolean {
+    if (typeof window === 'undefined') return false;
+    return (navigator as any).standalone === true || window.matchMedia('(display-mode: standalone)').matches;
   }
 
   /**
