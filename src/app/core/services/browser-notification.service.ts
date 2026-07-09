@@ -244,20 +244,48 @@ export class BrowserNotificationService {
     try {
       requestAnimationFrame(() => {
         try {
-          const n = new Notification('💠 Copilot Financiero', {
+          const options: NotificationOptions = {
             body: summary,
             icon: '/economico.png',
             badge: '/economico.png',
             silent: false,
             requireInteraction: true,
             tag: `cf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-          });
+          };
+          console.log('[BrowserNotification] creando Notification con opciones:', options);
+          const n = new Notification('💠 Copilot Financiero', options);
+
+          // Si el navegador descarta la notificación, dispara `error`.
+          let notificationFailed = false;
+          n.onerror = (ev: Event) => {
+            notificationFailed = true;
+            const msg = (ev as ErrorEvent).message || 'desconocido';
+            const errFull = `Event error: ${msg}`;
+            console.error('[BrowserNotification] ✗ onerror:', errFull);
+            this.toast.danger('Notificación descartada por el navegador', errFull);
+            this.notifications.push({
+              title: '⚠ Notificación descartada',
+              description: errFull,
+              severity: 'danger',
+              category: 'system',
+              announce: true,
+              referenceId: 'browser-discarded-' + Date.now()
+            });
+          };
           n.onclick = () => { window.focus(); n.close(); };
-          console.log('[BrowserNotification] ✓ Notificación nativa creada OK:', summary);
-          this.toast.success(
-            'Notificación del navegador enviada',
-            summary + ' — revisa la bandeja del sistema operativo (arriba a la derecha en Windows / barra superior en Mac / panel de notificaciones en Android).'
-          );
+
+          // A los 800ms verificamos si la notificación se mantuvo
+          // visible o fue descartada silenciosamente.
+          setTimeout(() => {
+            if (notificationFailed) return;
+            console.log('[BrowserNotification] verificación 800ms — failed?', notificationFailed, 'perm:', Notification.permission);
+            this.toast.success(
+              'Notificación del SO creada',
+              summary + ' — si no la ves, desliza la barra de notificaciones del teléfono.'
+            );
+          }, 800);
+
+          console.log('[BrowserNotification] ✓ Notificación nativa creada. Permiso:', Notification.permission, 'Tag:', options.tag);
           this.notifications.push({
             title: '💠 Copilot Financiero',
             description: summary,
@@ -267,13 +295,36 @@ export class BrowserNotificationService {
             referenceId: 'browser-sent-' + Date.now()
           });
         } catch (innerErr: any) {
-          console.warn('[BrowserNotification] ✗ error creando Notification:', innerErr);
-          this.fallbackInApp(this.explainError(innerErr), 'danger');
+          // Imprime el error COMPLETO en la notificación toast Y en la campana
+          const errFull = innerErr?.message
+            ? `${innerErr.name || 'Error'}: ${innerErr.message}`
+            : String(innerErr);
+          const errStack = innerErr?.stack ? '\nStack: ' + innerErr.stack.split('\n').slice(0, 3).join(' | ') : '';
+          console.error('[BrowserNotification] ✗ error creando Notification (completo):', innerErr);
+          this.toast.danger('Error al crear la notificación', errFull);
+          this.notifications.push({
+            title: '⚠ Error: notificación del SO',
+            description: `${errFull}${errStack}`,
+            severity: 'danger',
+            category: 'system',
+            announce: true,
+            referenceId: 'browser-error-' + Date.now()
+          });
         }
       });
     } catch (e: any) {
-      console.warn('[BrowserNotification] ✗ error en rAF:', e);
-      this.fallbackInApp(this.explainError(e), 'danger');
+      const errFull = e?.message ? `${e.name || 'Error'}: ${e.message}` : String(e);
+      const errStack = e?.stack ? '\nStack: ' + e.stack.split('\n').slice(0, 3).join(' | ') : '';
+      console.error('[BrowserNotification] ✗ error en rAF (completo):', e);
+      this.toast.danger('Error al programar la notificación', errFull);
+      this.notifications.push({
+        title: '⚠ Error: notificación del SO',
+        description: `${errFull}${errStack}`,
+        severity: 'danger',
+        category: 'system',
+        announce: true,
+        referenceId: 'browser-error-' + Date.now()
+      });
     }
   }
 
