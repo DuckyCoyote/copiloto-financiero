@@ -243,89 +243,105 @@ export class BrowserNotificationService {
 
     try {
       requestAnimationFrame(() => {
-        try {
-          const options: NotificationOptions = {
-            body: summary,
-            icon: '/economico.png',
-            badge: '/economico.png',
-            silent: false,
-            requireInteraction: true,
-            tag: `cf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
-          };
-          console.log('[BrowserNotification] creando Notification con opciones:', options);
-          const n = new Notification('💠 Copilot Financiero', options);
-
-          // Si el navegador descarta la notificación, dispara `error`.
-          let notificationFailed = false;
-          n.onerror = (ev: Event) => {
-            notificationFailed = true;
-            const msg = (ev as ErrorEvent).message || 'desconocido';
-            const errFull = `Event error: ${msg}`;
-            console.error('[BrowserNotification] ✗ onerror:', errFull);
-            this.toast.danger('Notificación descartada por el navegador', errFull);
-            this.notifications.push({
-              title: '⚠ Notificación descartada',
-              description: errFull,
-              severity: 'danger',
-              category: 'system',
-              announce: true,
-              referenceId: 'browser-discarded-' + Date.now()
-            });
-          };
-          n.onclick = () => { window.focus(); n.close(); };
-
-          // A los 800ms verificamos si la notificación se mantuvo
-          // visible o fue descartada silenciosamente.
-          setTimeout(() => {
-            if (notificationFailed) return;
-            console.log('[BrowserNotification] verificación 800ms — failed?', notificationFailed, 'perm:', Notification.permission);
-            this.toast.success(
-              'Notificación del SO creada',
-              summary + ' — si no la ves, desliza la barra de notificaciones del teléfono.'
-            );
-          }, 800);
-
-          console.log('[BrowserNotification] ✓ Notificación nativa creada. Permiso:', Notification.permission, 'Tag:', options.tag);
-          this.notifications.push({
-            title: '💠 Copilot Financiero',
-            description: summary,
-            severity: 'info',
-            category: 'system',
-            announce: false,
-            referenceId: 'browser-sent-' + Date.now()
-          });
-        } catch (innerErr: any) {
-          // Imprime el error COMPLETO en la notificación toast Y en la campana
-          const errFull = innerErr?.message
-            ? `${innerErr.name || 'Error'}: ${innerErr.message}`
-            : String(innerErr);
-          const errStack = innerErr?.stack ? '\nStack: ' + innerErr.stack.split('\n').slice(0, 3).join(' | ') : '';
-          console.error('[BrowserNotification] ✗ error creando Notification (completo):', innerErr);
-          this.toast.danger('Error al crear la notificación', errFull);
-          this.notifications.push({
-            title: '⚠ Error: notificación del SO',
-            description: `${errFull}${errStack}`,
-            severity: 'danger',
-            category: 'system',
-            announce: true,
-            referenceId: 'browser-error-' + Date.now()
-          });
-        }
+        // Si hay un Service Worker registrado y activo, debemos
+        // usar `registration.showNotification()` en vez de
+        // `new Notification()`. Chrome bloquea el constructor
+        // directo cuando hay SW (incluso si la app no está
+        // "instalada" formalmente).
+        this.showWithServiceWorker(summary, reason);
       });
     } catch (e: any) {
       const errFull = e?.message ? `${e.name || 'Error'}: ${e.message}` : String(e);
-      const errStack = e?.stack ? '\nStack: ' + e.stack.split('\n').slice(0, 3).join(' | ') : '';
       console.error('[BrowserNotification] ✗ error en rAF (completo):', e);
       this.toast.danger('Error al programar la notificación', errFull);
+    }
+  }
+
+  /**
+   * Muestra la notificación. Si hay un Service Worker activo,
+   * usa `registration.showNotification()`. Si no, usa
+   * `new Notification()` como fallback.
+   */
+  private showWithServiceWorker(summary: string, reason: 'schedule' | 'manual' | 'test-5s'): void {
+    const options: NotificationOptions = {
+      body: summary,
+      icon: '/economico.png',
+      badge: '/economico.png',
+      silent: false,
+      requireInteraction: true,
+      tag: `cf-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`
+    };
+
+    if ('serviceWorker' in navigator && navigator.serviceWorker.controller) {
+      console.log('[BrowserNotification] usando ServiceWorker.showNotification');
+      navigator.serviceWorker.ready.then((reg) => {
+        reg.showNotification('💠 Copilot Financiero', options).then(() => {
+          console.log('[BrowserNotification] ✓ Notificación SW creada OK');
+          this.onNotificationSent(summary, reason);
+        }).catch((err) => {
+          console.error('[BrowserNotification] ✗ SW showNotification falló:', err);
+          this.fallbackToDirectNotification(summary, options, reason, err);
+        });
+      }).catch((err) => {
+        console.warn('[BrowserNotification] SW ready falló:', err);
+        this.fallbackToDirectNotification(summary, options, reason, err);
+      });
+    } else {
+      console.log('[BrowserNotification] sin SW activo, usando new Notification');
+      this.fallbackToDirectNotification(summary, options, reason, null);
+    }
+  }
+
+  /** Fallback: usa `new Notification` cuando no hay SW o falla. */
+  private fallbackToDirectNotification(summary: string, options: NotificationOptions, reason: 'schedule' | 'manual' | 'test-5s', swError: any): void {
+    try {
+      const n = new Notification('💠 Copilot Financiero', options);
+      n.onclick = () => { window.focus(); n.close(); };
+      n.onerror = (ev: Event) => {
+        const msg = (ev as ErrorEvent).message || 'desconocido';
+        this.notifications.push({
+          title: '⚠ Notificación descartada',
+          description: msg,
+          severity: 'danger',
+          category: 'system',
+          announce: true,
+          referenceId: 'browser-discarded-' + Date.now()
+        });
+      };
+      console.log('[BrowserNotification] ✓ new Notification OK');
+      this.onNotificationSent(summary, reason);
+    } catch (e: any) {
+      const errFull = e?.message
+        ? `${e.name || 'Error'}: ${e.message}`
+        : String(e);
+      const errStack = e?.stack ? '\nStack: ' + e.stack.split('\n').slice(0, 3).join(' | ') : '';
+      console.error('[BrowserNotification] ✗ error creando Notification:', e);
+      this.toast.danger('Error al crear la notificación', errFull);
       this.notifications.push({
         title: '⚠ Error: notificación del SO',
-        description: `${errFull}${errStack}`,
+        description: (swError ? 'SW error: ' + (swError?.message || swError) + '\n' : '') + errFull + errStack,
         severity: 'danger',
         category: 'system',
         announce: true,
         referenceId: 'browser-error-' + Date.now()
       });
     }
+  }
+
+  /** Callback común: loguea, toast success, añade a la campana. */
+  private onNotificationSent(summary: string, reason: 'schedule' | 'manual' | 'test-5s'): void {
+    this.toast.success(
+      'Notificación del SO creada',
+      summary + ' — si no la ves, desliza la barra de notificaciones del teléfono.'
+    );
+    this.notifications.push({
+      title: '💠 Copilot Financiero',
+      description: summary,
+      severity: 'info',
+      category: 'system',
+      announce: false,
+      referenceId: 'browser-sent-' + Date.now()
+    });
   }
 
   /**
