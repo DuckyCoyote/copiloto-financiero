@@ -1,5 +1,5 @@
 import { CommonModule } from '@angular/common';
-import { AfterViewChecked, Component, ElementRef, ViewChild, computed, inject, signal } from '@angular/core';
+import { AfterViewChecked, Component, ElementRef, OnInit, ViewChild, computed, inject, signal } from '@angular/core';
 import { FormsModule } from '@angular/forms';
 import { ChatMessage } from '../../core/models';
 import { AIService, ChatService, FinanceDataService, FormatService, SmartRegisterService, ToastService } from '../../core/services';
@@ -73,16 +73,20 @@ import { MarkdownPipe } from '../../shared/markdown.pipe';
         }
       </div>
       <div class="suggestions-bar" role="toolbar" aria-label="Sugerencias rápidas">
-        @for (s of quickSuggestions; track s) {
-          <button type="button" class="suggestion-pill" (click)="useSuggestion(s)" [disabled]="busy()">
-            <app-icon name="zap" [size]="12"></app-icon>
-            <span>{{ s }}</span>
-          </button>
-        }
+        <span class="suggestions-label">
+          <app-icon name="zap" [size]="12"></app-icon> Sugerencias:
+        </span>
+        <div class="suggestions-scroll">
+          @for (s of quickSuggestions; track s) {
+            <button type="button" class="suggestion-pill" (click)="useSuggestion(s)" [disabled]="busy()">
+              {{ s }}
+            </button>
+          }
+        </div>
       </div>
 
       <form class="composer" (submit)="send($event)">
-        <input #inputEl type="text" [(ngModel)]="input" name="input" placeholder="Escribe una pregunta o elige una sugerencia arriba…" autocomplete="off" />
+        <input #inputEl type="text" [(ngModel)]="input" name="input" placeholder="Escribe una pregunta o pulsa una sugerencia…" autocomplete="off" />
         <button type="submit" class="btn btn-primary" [disabled]="busy() || !input.trim()">
           <app-icon name="send" [size]="14"></app-icon> Enviar
         </button>
@@ -212,44 +216,62 @@ import { MarkdownPipe } from '../../shared/markdown.pipe';
 
     /* Barra de sugerencias flotante */
     .suggestions-bar {
-      display: flex; gap: 6px; flex-wrap: nowrap;
-      padding: 10px 12px 6px 12px;
-      overflow-x: auto;
-      scrollbar-width: thin;
-      background: var(--color-surface);
+      display: flex; align-items: center; gap: 10px;
+      padding: 12px;
+      background: var(--color-surface-2);
       border-top: 1px solid var(--color-border);
       flex-shrink: 0;
     }
+    .suggestions-label {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 600;
+      color: var(--color-text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      flex-shrink: 0;
+    }
+    .suggestions-scroll {
+      display: flex; gap: 6px; flex-wrap: nowrap;
+      overflow-x: auto;
+      scrollbar-width: thin;
+      flex: 1;
+      padding-bottom: 2px;
+    }
     .suggestion-pill {
       display: inline-flex; align-items: center; gap: 4px;
-      padding: 6px 10px;
+      padding: 7px 12px;
       border-radius: 999px;
-      background: var(--color-surface-2);
+      background: var(--color-surface);
       border: 1px solid var(--color-border);
       color: var(--color-text);
-      font-size: 12px;
+      font-size: 12.5px;
+      font-weight: 500;
       white-space: nowrap;
       flex-shrink: 0;
       cursor: pointer;
       font-family: inherit;
-      transition: background .12s ease, transform .05s ease;
+      transition: background .12s ease, transform .05s ease, border-color .12s ease;
     }
-    .suggestion-pill:hover:not(:disabled) { background: var(--color-surface-3); }
+    .suggestion-pill:hover:not(:disabled) {
+      background: var(--color-text);
+      color: var(--color-bg);
+      border-color: var(--color-text);
+    }
     .suggestion-pill:active { transform: translateY(1px); }
-    .suggestion-pill:disabled { opacity: 0.5; cursor: not-allowed; }
+    .suggestion-pill:disabled { opacity: 0.4; cursor: not-allowed; }
 
     /* Móvil: el shell ocupa todo el alto disponible, el header se hace más compacto */
     @media (max-width: 600px) {
       .chat-shell { height: calc(100dvh - var(--header-height) - 16px - 180px); min-height: 320px; }
       .messages { padding: 14px; gap: 10px; }
-      .msg { max-width: 95%; }
+      .msg { max-width: 95%; flex-direction: column; }
       .avatar { width: 28px; height: 28px; }
       .bubble { padding: 9px 12px; font-size: 14px; }
       .composer { padding: 10px 12px; }
     }
   `]
 })
-export class ChatComponent implements AfterViewChecked {
+export class ChatComponent implements OnInit, AfterViewChecked {
   readonly ai = inject(AIService);
   readonly chat = inject(ChatService);
   private readonly toast = inject(ToastService);
@@ -335,12 +357,22 @@ export class ChatComponent implements AfterViewChecked {
 
   ngAfterViewChecked(): void {
     // Detecta mensajes nuevos y hace scroll automático si el usuario
-    // no ha scrolleado hacia arriba.
+    // no ha scrolleado hacia arriba. Usamos requestAnimationFrame
+    // para esperar a que Angular pinte el nuevo mensaje.
     const current = this.chat.messages().length;
     if (current !== this.lastMessageCount) {
       this.lastMessageCount = current;
-      this.scrollToBottom();
+      this.scheduleScrollToBottom();
     }
+  }
+
+  ngOnInit(): void {
+    // Si el chat se abre con mensajes previos, baja al fondo.
+    setTimeout(() => this.scrollToBottom(), 50);
+  }
+
+  private scheduleScrollToBottom(): void {
+    requestAnimationFrame(() => this.scrollToBottom());
   }
 
   confirmRegister(m: any): void {
