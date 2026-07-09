@@ -54,12 +54,30 @@ export class SmartRegisterService {
     // Si no detectó monto, no es un registro válido
     if (!draft.amount) return null;
 
-    // Tipo según palabras clave; fallback al del clasificador
-    const kind: RegisterKind =
-      SUBSCRIPTION_HINTS.some(k => lower.includes(k)) ? 'subscription' :
-      SERVICE_HINTS.some(k => lower.includes(k)) ? 'service' :
-      EXPENSE_HINTS.some(k => lower.includes(k)) || draft.kind === 'expense' ? 'expense' :
-      'expense';
+    // Tipo según palabras clave. El orden importa:
+    //   1. Si el usuario usa verbos de GASTO (gasté, compré, pagué…)
+    //      gana sobre cualquier otra cosa. Decir "gasto de mi servicio de
+    //      internet" es un GASTO, no un servicio.
+    //   2. Si el clasificador ya lo marcó como expense, es expense.
+    //   3. Si no, miramos suscripción (netflix, spotify, mensualidad…).
+    //   4. Después servicio (luz, agua, cfe, telmex…).
+    //   5. Fallback al kind del clasificador.
+    const userSaidExpense = EXPENSE_HINTS.some(k => lower.includes(k));
+    const userSaidSubscription = SUBSCRIPTION_HINTS.some(k => lower.includes(k));
+    const userSaidService = SERVICE_HINTS.some(k => lower.includes(k));
+
+    let kind: RegisterKind;
+    if (userSaidExpense) {
+      kind = 'expense';
+    } else if (userSaidSubscription) {
+      kind = 'subscription';
+    } else if (userSaidService) {
+      kind = 'service';
+    } else if (draft.kind === 'expense' || draft.kind === 'service' || draft.kind === 'subscription') {
+      kind = draft.kind;
+    } else {
+      kind = 'expense';
+    }
 
     // Categoría específica según el tipo
     const categoryId = this.pickCategoryId(kind, draft, lower);
