@@ -79,6 +79,7 @@ export const STORAGE_KEYS = {
   paymentMethods: 'cf:payment-methods',
   aiSettings: 'cf:ai-settings',
   chatHistory: 'cf:chat-history',
+  paymentStrategies: 'cf:payment-strategies',
   memory: 'cf:memory',
   theme: 'cf:theme',
   notifications: 'cf:notifications',

@@ -27,6 +27,24 @@ export interface CreditCard extends Timestamped {
   noInterestPayment?: MoneyAmount;
   /** Color para mostrar en UI. */
   color?: string;
+  /**
+   * Si la tarjeta ya está en un plan de pagos fijo acordado con el banco
+   * emisor (reestructura / "domiciliación a meses"), este campo lo indica.
+   * Mientras esté presente, el planificador la trata como un pago
+   * obligatorio de monto fijo (como un préstamo) en vez de aplicarle las
+   * heurísticas de liquidación/mínimo/espera.
+   */
+  institutionPlan?: CreditCardInstitutionPlan;
+}
+
+/** Plan de pagos fijo acordado directamente con el banco emisor de la tarjeta. */
+export interface CreditCardInstitutionPlan {
+  /** Pago fijo mensual acordado con el banco. */
+  fixedMonthlyPayment: MoneyAmount;
+  /** Meses restantes del plan, si se conoce. */
+  remainingMonths?: number;
+  /** Notas libres (ej. "Plan a 12 meses sin intereses BBVA"). */
+  notes?: string;
 }
 
 /** Servicio recurrente (luz, agua, internet, etc.). */

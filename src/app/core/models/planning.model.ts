@@ -75,6 +75,21 @@ export interface CalendarEvent extends Timestamped {
   referenceId?: ID;
   /** Monto estimado o confirmado. */
   amount?: MoneyAmount;
+  /** Metadata adicional del evento (montos extra, fechas, etc.). */
+  meta?: {
+    /** Pago mínimo (para tarjetas). */
+    minimumPayment?: MoneyAmount;
+    /** Pago para no generar intereses (para tarjetas). */
+    noInterestPayment?: MoneyAmount;
+    /** Saldo actual (para tarjetas). */
+    currentBalance?: MoneyAmount;
+    /** Día de corte (para tarjetas). */
+    cutOffDay?: number;
+    /** Día límite de pago (para tarjetas). */
+    paymentDueDay?: number;
+    /** Fecha de corte ISO. */
+    cutOffDate?: ISODate;
+  };
   /** Indica si el evento ya fue confirmado/pagado. */
   status: 'planned' | 'confirmed' | 'paid' | 'overdue' | 'cancelled';
 }

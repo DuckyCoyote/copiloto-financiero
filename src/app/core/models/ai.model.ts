@@ -6,7 +6,7 @@
  * implementa la llamada HTTP correspondiente.
  */
 
-import { ID } from './common.model';
+import { ID, ISODate } from './common.model';
 
 export type AIProviderId =
   | 'openai'
@@ -213,6 +213,101 @@ export interface PaymentPlanItem {
   reason: string;
   /** Si el plan sugiere no pagar o esperar. */
   optional: boolean;
+}
+
+// ---------------------------------------------------------------------
+// Estrategias de pago (múltiples planes comparables)
+// ---------------------------------------------------------------------
+
+/** Acción decidida para una tarjeta dentro de una estrategia. */
+export type PaymentStrategyAction = 'pay_full' | 'pay_minimum' | 'skip';
+
+/** Tipo de estrategia. Los 4 primeros son heurísticas locales; 'ai_custom' proviene de la IA. */
+export type PaymentStrategyKind = 'no_interest' | 'avalanche' | 'snowball' | 'liquidity' | 'ai_custom';
+
+/** Decisión de pago calculada para una tarjeta específica dentro de una estrategia. */
+export interface PaymentCardDecision {
+  cardId: ID;
+  cardName: string;
+  action: PaymentStrategyAction;
+  amount: number;
+  currency: string;
+  /** Día de corte próximo (ISO). Pagar el monto "sin intereses" antes de esta fecha evita intereses. */
+  cutOffDate: ISODate;
+  /** Fecha límite de pago (ISO). Pagar al menos el mínimo antes de esta fecha evita comisión por pago tardío. */
+  paymentDueDate: ISODate;
+  /** Fecha recomendada para ejecutar el pago (cutOffDate si action=pay_full, paymentDueDate en otro caso). */
+  payBy: ISODate;
+  /** Fecha del próximo ingreso/quincena que alcanza a cubrir el pago a tiempo, si existe. */
+  fundedByPayday?: ISODate;
+  /** Indica si hay un ingreso proyectado a tiempo para cubrir `payBy`. */
+  fundedInTime: boolean;
+  /** Interés estimado que se generará este ciclo por el saldo no cubierto. */
+  projectedInterest: number;
+  /** Explicación breve de la decisión. */
+  reason: string;
+}
+
+/** Un ingreso/quincena proyectado dentro del horizonte, usado para calcular la disponibilidad. */
+export interface ProjectedPayday {
+  date: ISODate;
+  amount: number;
+  source: string;
+}
+
+/** Ajustes manuales que el usuario puede aplicar antes de recalcular las estrategias. */
+export interface PaymentPlanOverrides {
+  /** Ingreso extra puntual (aguinaldo, bono, venta, etc.). */
+  extraIncomeAmount?: number;
+  /** Fecha en que se recibiría el ingreso extra (ISO). Por defecto, hoy. */
+  extraIncomeDate?: ISODate;
+  /** Si se define, reemplaza la liquidez inicial estimada automáticamente. */
+  cashBufferOverride?: number;
+}
+
+/** Estrategia completa de pago: cómo repartir ingresos entre tarjetas, préstamos y gastos fijos. */
+export interface PaymentStrategy {
+  id: string;
+  kind: PaymentStrategyKind;
+  name: string;
+  /** Descripción de en qué consiste la estrategia (fija por tipo, o generada por IA). */
+  description: string;
+  /** Resumen calculado en lenguaje natural (montos, viabilidad). */
+  summary: string;
+  source: 'local' | 'ai';
+  generatedAt: string;
+  /** Préstamos, servicios esenciales y suscripciones (comunes a toda estrategia). */
+  items: PaymentPlanItem[];
+  /** Decisión por tarjeta (varía según la estrategia). */
+  cardDecisions: PaymentCardDecision[];
+  /** Ingresos/quincenas proyectados considerados. */
+  paydays: ProjectedPayday[];
+  totals: {
+    /** Total a pagar en el horizonte (préstamos + servicios + suscripciones obligatorias + tarjetas). */
+    totalToPay: number;
+    /** Interés total proyectado por tarjetas con pago parcial o sin pago. */
+    projectedInterest: number;
+    /** Tarjetas que se liquidan / pagan sin intereses. */
+    cardsSettled: number;
+    /** Tarjetas que solo reciben el pago mínimo. */
+    cardsMinimumOnly: number;
+    /** Tarjetas que se dejan sin pagar este ciclo. */
+    cardsSkipped: number;
+  };
+  /** Liquidez inicial estimada (o forzada por override). */
+  startingLiquidity: number;
+  /** Ingresos esperados durante el horizonte (suma de `paydays` + extra). */
+  expectedIncome: number;
+  /** Disponible - total a pagar. Puede ser negativo si no alcanza. */
+  remainingAfter: number;
+  /** Si el total a pagar cabe dentro de la liquidez + ingresos esperados. */
+  feasible: boolean;
+  /** Alertas relevantes (falta de liquidez, tarjetas en riesgo de intereses, etc.). */
+  warnings: string[];
+  /** Marca la estrategia sugerida por defecto. */
+  recommended?: boolean;
+  /** Si vino de la IA, motivo/razonamiento adicional que dio el modelo. */
+  aiRationale?: string;
 }
 
 /** Resultado de una simulación financiera. */

@@ -1,6 +1,7 @@
 import { CommonModule } from '@angular/common';
 import { Component, HostListener, computed, inject, signal } from '@angular/core';
-import { CalendarEvent } from '../../core/models';
+import { FormsModule } from '@angular/forms';
+import { CalendarEvent, CreditCard } from '../../core/models';
 import { FinanceDataService, FormatService } from '../../core/services';
 import { IconComponent, IconName } from '../../shared/icon/icon.component';
 import { ModalComponent } from '../../shared/modal/modal.component';
@@ -24,7 +25,7 @@ interface AgendaDay {
 @Component({
   selector: 'app-calendar',
   standalone: true,
-  imports: [CommonModule, IconComponent, ModalComponent],
+  imports: [CommonModule, FormsModule, IconComponent, ModalComponent],
   template: `
     <div class="page-header">
       <div class="title-block">
@@ -47,6 +48,68 @@ interface AgendaDay {
         </button>
       </div>
     </div>
+
+    <!-- Filtro de entidades (tarjetas, préstamos, servicios, suscripciones) -->
+    @if (cards().length + loans().length + services().length + subscriptions().length > 0) {
+      <div class="card-flat filters mb-4">
+        <div class="filter-head">
+          <strong class="text-sm">
+            <app-icon name="filter" [size]="14"></app-icon> Filtrar:
+          </strong>
+          <button type="button" class="btn btn-sm" (click)="selectAll()">
+            {{ allSelected() ? 'Ninguno' : 'Todo' }}
+          </button>
+        </div>
+
+        <div class="filter-group">
+          <span class="filter-label">
+            <app-icon name="card" [size]="12"></app-icon> Tarjetas
+          </span>
+          @for (c of cards(); track c.id) {
+            <label class="chip" [class.active]="isSelected('card', c.id)">
+              <input type="checkbox" [checked]="isSelected('card', c.id)" (change)="toggle('card', c.id)" />
+              <span>{{ c.name }}</span>
+            </label>
+          }
+        </div>
+
+        <div class="filter-group">
+          <span class="filter-label">
+            <app-icon name="loan" [size]="12"></app-icon> Préstamos
+          </span>
+          @for (l of loans(); track l.id) {
+            <label class="chip" [class.active]="isSelected('loan', l.id)">
+              <input type="checkbox" [checked]="isSelected('loan', l.id)" (change)="toggle('loan', l.id)" />
+              <span>{{ l.name }}</span>
+            </label>
+          }
+        </div>
+
+        <div class="filter-group">
+          <span class="filter-label">
+            <app-icon name="lightbulb" [size]="12"></app-icon> Servicios
+          </span>
+          @for (s of services(); track s.id) {
+            <label class="chip" [class.active]="isSelected('service', s.id)">
+              <input type="checkbox" [checked]="isSelected('service', s.id)" (change)="toggle('service', s.id)" />
+              <span>{{ s.name }}</span>
+            </label>
+          }
+        </div>
+
+        <div class="filter-group">
+          <span class="filter-label">
+            <app-icon name="repeat" [size]="12"></app-icon> Suscripciones
+          </span>
+          @for (s of subscriptions(); track s.id) {
+            <label class="chip" [class.active]="isSelected('subscription', s.id)">
+              <input type="checkbox" [checked]="isSelected('subscription', s.id)" (change)="toggle('subscription', s.id)" />
+              <span>{{ s.name }}</span>
+            </label>
+          }
+        </div>
+      </div>
+    }
 
     @if (view() === 'grid') {
       <div class="card calendar">
@@ -93,6 +156,12 @@ interface AgendaDay {
                 <div class="agenda-body">
                   <strong>{{ e.title }}</strong>
                   @if (e.description) {<small class="text-muted">{{ e.description }}</small>}
+                  @if (hasDifferentPayments(e)) {
+                    <small class="agenda-detail">
+                      <span class="amount-min">Mín: {{ fmt.formatMoney(e.meta!.minimumPayment!.amount, e.meta!.minimumPayment!.currency) }}</span>
+                      <span class="amount-noi">Sin intereses: {{ fmt.formatMoney(e.meta!.noInterestPayment!.amount, e.meta!.noInterestPayment!.currency) }}</span>
+                    </small>
+                  }
                 </div>
                 @if (e.amount) {
                   <span class="font-mono text-sm">{{ fmt.formatMoney(e.amount.amount, e.amount.currency) }}</span>
@@ -120,6 +189,28 @@ interface AgendaDay {
               @if (e.description) {
                 <small class="text-muted">{{ e.description }}</small>
               }
+              @if (e.meta?.noInterestPayment || e.meta?.minimumPayment) {
+                <div class="detail-amounts">
+                  @if (e.meta?.noInterestPayment; as n) {
+                    <div class="amount-row no-interest">
+                      <span class="amount-label">Sin intereses:</span>
+                      <strong class="font-mono">{{ fmt.formatMoney(n.amount, n.currency) }}</strong>
+                    </div>
+                  }
+                  @if (e.meta?.minimumPayment; as m) {
+                    <div class="amount-row minimum">
+                      <span class="amount-label">Mínimo:</span>
+                      <strong class="font-mono">{{ fmt.formatMoney(m.amount, m.currency) }}</strong>
+                    </div>
+                  }
+                  @if (e.meta?.currentBalance; as c) {
+                    <div class="amount-row balance">
+                      <span class="amount-label">Saldo:</span>
+                      <strong class="font-mono">{{ fmt.formatMoney(c.amount, c.currency) }}</strong>
+                    </div>
+                  }
+                </div>
+              }
             </div>
             <div class="detail-amount">
               @if (e.amount) {
@@ -142,6 +233,33 @@ interface AgendaDay {
     .view-toggle.active { background: var(--color-text); color: var(--color-bg); border-color: var(--color-text); }
     .view-toggle.active app-icon { color: var(--color-bg); }
     .hint { padding: 10px 16px; color: var(--color-text-muted); font-size: 12px; margin: 0; }
+
+    /* Filtros */
+    .filters { padding: 12px 16px; display: flex; flex-direction: column; gap: 10px; }
+    .filter-head { display: flex; align-items: center; gap: 8px; }
+    .filter-head strong { display: inline-flex; align-items: center; gap: 4px; }
+    .filter-group { display: flex; align-items: center; gap: 6px; flex-wrap: wrap; padding-left: 4px; }
+    .filter-label {
+      display: inline-flex; align-items: center; gap: 4px;
+      font-size: 11px; font-weight: 600;
+      color: var(--color-text-muted);
+      text-transform: uppercase; letter-spacing: 0.04em;
+      margin-right: 4px;
+      min-width: 110px;
+    }
+    .chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 4px 10px; border-radius: 999px;
+      background: var(--color-surface-2);
+      border: 1px solid var(--color-border);
+      font-size: 12px; cursor: pointer;
+      user-select: none;
+      transition: background .12s ease, color .12s ease;
+    }
+    .chip:hover { background: var(--color-surface-3); }
+    .chip.active { background: var(--color-text); color: var(--color-bg); border-color: var(--color-text); }
+    .chip input { display: none; }
+    .chip span { white-space: nowrap; }
 
     /* ---------- Grid ---------- */
     .calendar { padding: 0; overflow: hidden; }
@@ -174,8 +292,6 @@ interface AgendaDay {
       box-shadow: inset 0 0 0 2px var(--color-text);
     }
     .day-num { font-weight: 600; font-size: 12px; }
-
-    /* Pill de evento: muy visible incluso en móvil */
     .event-pill {
       display: flex; align-items: center; gap: 4px;
       padding: 2px 6px; border-radius: 4px;
@@ -184,11 +300,7 @@ interface AgendaDay {
       white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
       border-left: 3px solid var(--color-text);
     }
-    .event-pill .dot {
-      width: 6px; height: 6px; border-radius: 50%;
-      background: var(--color-text);
-      flex-shrink: 0;
-    }
+    .event-pill .dot { width: 6px; height: 6px; border-radius: 50%; background: var(--color-text); flex-shrink: 0; }
     .event-pill .label { font-weight: 500; flex: 1; overflow: hidden; text-overflow: ellipsis; }
     .event-pill.tone-loan { border-left-color: var(--color-text); }
     .event-pill.tone-card { border-left-color: var(--color-text-muted); }
@@ -212,8 +324,11 @@ interface AgendaDay {
     .agenda-item.tone-credit_card_payment { border-left: 3px solid var(--color-text-muted); }
     .agenda-item.tone-subscription_payment, .agenda-item.tone-service_payment { border-left: 3px solid var(--color-text-dim); }
     .agenda-item.status-paid { opacity: 0.5; }
-    .agenda-body { flex: 1; display: flex; flex-direction: column; }
+    .agenda-body { flex: 1; display: flex; flex-direction: column; gap: 2px; min-width: 0; }
     .agenda-body small { display: block; }
+    .agenda-detail { display: flex; gap: 12px; flex-wrap: wrap; margin-top: 2px; }
+    .amount-min { color: var(--color-text-muted); font-size: 11px; }
+    .amount-noi { font-weight: 600; font-size: 11px; }
 
     /* ---------- Modal de detalle ---------- */
     .detail-item {
@@ -231,6 +346,11 @@ interface AgendaDay {
     }
     .detail-body { flex: 1; display: flex; flex-direction: column; gap: 4px; min-width: 0; }
     .detail-amount { text-align: right; display: flex; flex-direction: column; gap: 4px; align-items: flex-end; }
+    .detail-amounts { display: flex; flex-direction: column; gap: 2px; margin-top: 6px; }
+    .amount-row { display: flex; gap: 10px; align-items: center; font-size: 12.5px; }
+    .amount-label { color: var(--color-text-muted); min-width: 110px; }
+    .amount-row.no-interest strong { color: var(--color-success, #22c55e); }
+    .amount-row.minimum strong { color: var(--color-text-muted); }
 
     @media (max-width: 700px) {
       .dow-cell { font-size: 10px; padding: 6px 2px; }
@@ -251,7 +371,57 @@ export class CalendarComponent {
   readonly current = signal(new Date());
   readonly view = signal<'grid' | 'agenda'>('grid');
   readonly selectedCell = signal<DayCell | null>(null);
+  /** Set con `"<kind>:<id>"` para entidades desmarcadas. Vacío = todo seleccionado. */
+  readonly hiddenEntities = signal<Set<string>>(new Set());
   readonly dows = ['Dom', 'Lun', 'Mar', 'Mié', 'Jue', 'Vie', 'Sáb'];
+
+  readonly cards = computed(() => this.finance.creditCards());
+  readonly loans = computed(() => this.finance.loans());
+  readonly services = computed(() => this.finance.services());
+  readonly subscriptions = computed(() => this.finance.subscriptions());
+
+  readonly allSelected = computed(() => this.hiddenEntities().size === 0);
+
+  isSelected(kind: 'card' | 'loan' | 'service' | 'subscription', id: string): boolean {
+    return !this.hiddenEntities().has(`${kind}:${id}`);
+  }
+
+  toggle(kind: 'card' | 'loan' | 'service' | 'subscription', id: string): void {
+    const set = new Set(this.hiddenEntities());
+    const key = `${kind}:${id}`;
+    if (set.has(key)) {
+      set.delete(key);
+    } else {
+      // Si actualmente todo está seleccionado, desmarcamos los demás
+      // y dejamos solo este seleccionado.
+      if (this.allSelected()) {
+        const all = [
+          ...this.cards().map(c => `card:${c.id}`),
+          ...this.loans().map(l => `loan:${l.id}`),
+          ...this.services().map(s => `service:${s.id}`),
+          ...this.subscriptions().map(s => `subscription:${s.id}`)
+        ];
+        all.forEach(k => set.delete(k));
+      }
+      set.add(key);
+    }
+    this.hiddenEntities.set(set);
+  }
+
+  selectAll(): void {
+    if (this.allSelected()) {
+      // "Ninguno": ocultamos todas las entidades filtrables.
+      const all = [
+        ...this.cards().map(c => `card:${c.id}`),
+        ...this.loans().map(l => `loan:${l.id}`),
+        ...this.services().map(s => `service:${s.id}`),
+        ...this.subscriptions().map(s => `subscription:${s.id}`)
+      ];
+      this.hiddenEntities.set(new Set(all));
+    } else {
+      this.hiddenEntities.set(new Set());
+    }
+  }
 
   readonly monthLabel = computed(() => {
     const d = this.current();
@@ -270,7 +440,7 @@ export class CalendarComponent {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
       const iso = d.toISOString().slice(0, 10);
-      const events = this.eventsFor(iso);
+      const events = this.filteredEvents(this.eventsFor(iso));
       days.push({
         date: d,
         iso,
@@ -291,7 +461,7 @@ export class CalendarComponent {
       const d = new Date(start);
       d.setDate(start.getDate() + i);
       const iso = d.toISOString().slice(0, 10);
-      const events = this.eventsFor(iso).sort((a, b) => (b.amount?.amount ?? 0) - (a.amount?.amount ?? 0));
+      const events = this.filteredEvents(this.eventsFor(iso)).sort((a, b) => (b.amount?.amount ?? 0) - (a.amount?.amount ?? 0));
       if (events.length === 0) continue;
       days.push({
         date: d,
@@ -302,6 +472,26 @@ export class CalendarComponent {
     }
     return days;
   });
+
+  /** Filtra eventos según las entidades desmarcadas. */
+  private filteredEvents(events: CalendarEvent[]): CalendarEvent[] {
+    const hidden = this.hiddenEntities();
+    if (hidden.size === 0) return events; // sin filtro = todas
+    return events.filter(e => {
+      const kind = this.eventKindToFilter(e.kind);
+      if (!kind) return true; // no filtrable: siempre se muestra
+      return !hidden.has(`${kind}:${e.referenceId ?? ''}`);
+    });
+  }
+
+  /** Traduce el kind del evento al kind del filtro. */
+  private eventKindToFilter(kind: CalendarEvent['kind']): 'card' | 'loan' | 'service' | 'subscription' | null {
+    if (kind === 'credit_card_payment') return 'card';
+    if (kind === 'loan_payment') return 'loan';
+    if (kind === 'service_payment') return 'service';
+    if (kind === 'subscription_payment') return 'subscription';
+    return null;
+  }
 
   @HostListener('window:resize')
   onResize(): void {
@@ -323,18 +513,14 @@ export class CalendarComponent {
     this.selectedCell.set(cell);
   }
 
-  selectedDayTitle(cell: DayCell): string {
-    const formatted = cell.date.toLocaleDateString('es-MX', {
-      weekday: 'long',
-      day: 'numeric',
-      month: 'long',
-      year: 'numeric'
-    });
-    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
-  }
-
   hasKind(events: CalendarEvent[], kind: CalendarEvent['kind']): boolean {
     return events.some(e => e.kind === kind);
+  }
+
+  hasDifferentPayments(e: CalendarEvent): boolean {
+    const min = e.meta?.minimumPayment?.amount ?? 0;
+    const noi = e.meta?.noInterestPayment?.amount ?? 0;
+    return e.meta?.minimumPayment != null && e.meta?.noInterestPayment != null && min !== noi && noi > 0;
   }
 
   totalLabel(events: CalendarEvent[]): string {
@@ -349,10 +535,10 @@ export class CalendarComponent {
       expense: 'expense',
       service_payment: 'lightbulb',
       subscription_payment: 'repeat',
-      loan_payment: 'landmark',
+      loan_payment: 'loan',
       credit_card_payment: 'card',
       reminder: 'bell',
-      goal: 'target',
+      goal: 'goal',
       other: 'file-text'
     };
     return map[k];
@@ -391,6 +577,16 @@ export class CalendarComponent {
     return 'badge-info';
   }
 
+  selectedDayTitle(cell: DayCell): string {
+    const formatted = cell.date.toLocaleDateString('es-MX', {
+      weekday: 'long',
+      day: 'numeric',
+      month: 'long',
+      year: 'numeric'
+    });
+    return formatted.charAt(0).toUpperCase() + formatted.slice(1);
+  }
+
   private eventsFor(iso: string): CalendarEvent[] {
     const list: CalendarEvent[] = [];
     for (const loan of this.finance.loans().filter(l => l.active)) {
@@ -411,15 +607,28 @@ export class CalendarComponent {
     for (const card of this.finance.creditCards()) {
       const d = new Date(iso);
       if (d.getDate() === card.paymentDueDay) {
+        // Calculamos el pago para no generar intereses: si hay
+        // noInterestPayment configurado, ese; si no, el saldo actual.
+        const noInterest = card.noInterestPayment ?? card.currentBalance;
+        const min = card.minimumPayment ?? { amount: card.currentBalance.amount * 0.1, currency: card.currentBalance.currency };
+        const cutOffDate = this.computeCutOffDate(iso, card.cutOffDay);
         list.push({
           id: `card-${card.id}-${iso}`,
           title: card.name,
           date: iso,
           kind: 'credit_card_payment',
           referenceId: card.id,
-          amount: card.minimumPayment ?? { amount: card.currentBalance.amount * 0.1, currency: card.currentBalance.currency },
+          amount: min,
           status: d < new Date() ? 'paid' : 'planned',
-          createdAt: new Date().toISOString()
+          createdAt: new Date().toISOString(),
+          meta: {
+            minimumPayment: min,
+            noInterestPayment: noInterest,
+            currentBalance: card.currentBalance,
+            cutOffDay: card.cutOffDay,
+            paymentDueDay: card.paymentDueDay,
+            cutOffDate
+          }
         });
       }
     }
@@ -452,5 +661,21 @@ export class CalendarComponent {
       }
     }
     return list.sort((a, b) => (b.amount?.amount ?? 0) - (a.amount?.amount ?? 0));
+  }
+
+  /** Calcula la fecha ISO del próximo corte para la tarjeta. */
+  private computeCutOffDate(paymentIso: string, cutOffDay: number): string {
+    const payment = new Date(paymentIso);
+    // El corte suele ser ~10-15 días antes del pago
+    const cut = new Date(payment);
+    cut.setDate(cutOffDay);
+    // Si el día de corte ya pasó este mes, es el del mes que viene
+    if (cut < payment) {
+      // ya está bien
+    } else {
+      cut.setMonth(cut.getMonth() - 1);
+      cut.setDate(cutOffDay);
+    }
+    return cut.toISOString().slice(0, 10);
   }
 }
